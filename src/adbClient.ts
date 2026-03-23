@@ -21,10 +21,18 @@ export interface ConnectedDevice {
  */
 export class AdbClient {
     private adbPath: string;
+    private logcatChannel?: vscode.OutputChannel;
 
     constructor(private outputChannel: vscode.OutputChannel) {
         const config = vscode.workspace.getConfiguration('adb');
         this.adbPath = config.get<string>('path') || 'adb';
+    }
+
+    private getLogcatChannel(): vscode.OutputChannel {
+        if (!this.logcatChannel) {
+            this.logcatChannel = vscode.window.createOutputChannel('ADB Logcat', 'logcat');
+        }
+        return this.logcatChannel;
     }
 
     private async execute(command: string): Promise<string> {
@@ -195,8 +203,10 @@ export class AdbClient {
      * @param level Optional log level to filter by (V, D, I, W, E, F).
      */
     public async getLogcat(deviceId: string, pid?: string, level?: string): Promise<void> {
-        this.outputChannel.show();
-        this.outputChannel.appendLine(`Starting Logcat for device ${deviceId}...`);
+        const channel = this.getLogcatChannel();
+        channel.clear();
+        channel.show();
+        channel.appendLine(`Starting Logcat for device ${deviceId}...`);
 
         const args = ['-s', deviceId, 'logcat', '-v', 'time'];
         if (pid) {
@@ -210,15 +220,15 @@ export class AdbClient {
         const child = require('child_process').spawn(this.adbPath, args);
 
         child.stdout.on('data', (data: any) => {
-            this.outputChannel.append(data.toString());
+            channel.append(data.toString());
         });
 
         child.stderr.on('data', (data: any) => {
-            this.outputChannel.append(data.toString());
+            channel.append(data.toString());
         });
 
         child.on('close', (code: any) => {
-            this.outputChannel.appendLine(`Logcat process exited with code ${code}`);
+            channel.appendLine(`Logcat process exited with code ${code}`);
         });
     }
 
