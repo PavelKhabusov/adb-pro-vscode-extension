@@ -90,23 +90,31 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (deviceId) {
+            const lastApkFolder = context.globalState.get<string>('lastApkFolder');
             const uris = await vscode.window.showOpenDialog({
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
-                filters: { 'APK Files': ['apk'] }
+                filters: { 'APK Files': ['apk'] },
+                defaultUri: lastApkFolder ? vscode.Uri.file(lastApkFolder) : undefined
             });
 
             if (uris && uris.length > 0) {
                 const apkPath = uris[0].fsPath;
+                context.globalState.update('lastApkFolder', require('path').dirname(apkPath));
                 vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: `Installing APK on ${deviceId}...`,
                     cancellable: false
                 }, async () => {
                     try {
+                        const apkInfo = adbClient.getApkInfo(apkPath);
                         const result = await adbClient.installApk(deviceId!, apkPath);
-                        vscode.window.showInformationMessage(`Install Result: ${result}`);
+                        if (apkInfo) {
+                            vscode.window.showInformationMessage(`Installed ${apkInfo.packageName} v${apkInfo.versionName} (build ${apkInfo.versionCode})`);
+                        } else {
+                            vscode.window.showInformationMessage(`Install Result: ${result}`);
+                        }
                     } catch (e: any) {
                         vscode.window.showErrorMessage(e.message);
                     }
@@ -466,10 +474,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (deviceId) {
             try {
-                // Use TargetAppManager for package selection
                 let packageName = targetAppManager.getSelectedApp();
                 if (!packageName) {
-                    // If no app selected, ask user: "Select App" or "Show All"
                     const choice = await vscode.window.showQuickPick(
                         ['Select App to Filter', 'Show All Logs'],
                         { placeHolder: 'Filter Logcat?' }
@@ -478,7 +484,6 @@ export function activate(context: vscode.ExtensionContext) {
                         packageName = await targetAppManager.pickApp();
                     }
                 } else {
-                    // Confirm or Change
                     const selection = await vscode.window.showQuickPick(
                         [
                             { label: 'Yes', description: `Filter by ${packageName}` },
@@ -492,13 +497,22 @@ export function activate(context: vscode.ExtensionContext) {
                     } else if (selection?.label === 'Show All') {
                         packageName = undefined;
                     } else if (!selection) {
-                        return; // Cancelled
+                        return;
                     }
                 }
 
-                // Optional: Filter by Level
-                const levels = ['V', 'D', 'I', 'W', 'E', 'F']; // Verbose, Debug, Info, Warn, Error, Fatal
-                const level = await vscode.window.showQuickPick(levels, { placeHolder: 'Select Log Level (Optional)' });
+                const logcatLevels = [
+                    { label: 'All', description: 'Show all log levels' },
+                    { label: 'V', description: 'Verbose and above' },
+                    { label: 'D', description: 'Debug and above' },
+                    { label: 'I', description: 'Info and above' },
+                    { label: 'W', description: 'Warning and above' },
+                    { label: 'E', description: 'Error and above' },
+                    { label: 'F', description: 'Fatal only' },
+                ];
+                const levelPick = await vscode.window.showQuickPick(logcatLevels, { placeHolder: 'Select Log Level' });
+                if (!levelPick) { return; }
+                const level = levelPick.label === 'All' ? undefined : levelPick.label;
 
                 let pid: string | undefined;
                 if (packageName) {
@@ -514,6 +528,21 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
     }));
+
+    // Auto-refresh device list
+    let lastDeviceIds = '';
+    const devicePollInterval = setInterval(async () => {
+        try {
+            const devices = await adbClient.getConnectedDevices();
+            const currentIds = devices.map(d => d.id).sort().join(',');
+            if (currentIds !== lastDeviceIds) {
+                lastDeviceIds = currentIds;
+                adbWebviewProvider.refresh();
+                deviceTreeProvider.refresh();
+            }
+        } catch {}
+    }, 3000);
+    context.subscriptions.push({ dispose: () => clearInterval(devicePollInterval) });
 }
 
 /**

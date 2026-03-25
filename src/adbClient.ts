@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
 
@@ -21,6 +21,10 @@ export interface ConnectedDevice {
  */
 export class AdbClient {
     private adbPath: string;
+    private logcatChannel?: vscode.OutputChannel;
+    private logcatProcess?: ChildProcess;
+    private logcatDeviceId?: string;
+    private logcatPid?: string;
 
     constructor(private outputChannel: vscode.OutputChannel) {
         const config = vscode.workspace.getConfiguration('adb');
@@ -118,6 +122,67 @@ export class AdbClient {
         return this.execute(`-s ${deviceId} install -r "${apkPath}"`);
     }
 
+    private findAapt2(): string | undefined {
+        const { execSync } = require('child_process');
+        // Try aapt2 in PATH first
+        try {
+            execSync('aapt2 version', { encoding: 'utf8', timeout: 3000 });
+            return 'aapt2';
+        } catch {}
+        // Search in known SDK locations
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const home = os.homedir();
+        const sdkRoots = [
+            process.env.ANDROID_HOME,
+            process.env.ANDROID_SDK_ROOT,
+            path.join(home, 'Android', 'Sdk'),
+            path.join(home, 'Library', 'Android', 'sdk'),
+        ];
+        // Also search Unity SDK locations
+        const unityHub = path.join(home, 'Unity', 'Hub', 'Editor');
+        try {
+            for (const ver of fs.readdirSync(unityHub)) {
+                sdkRoots.push(path.join(unityHub, ver, 'Editor', 'Data', 'PlaybackEngines', 'AndroidPlayer', 'SDK'));
+            }
+        } catch {}
+        for (const sdk of sdkRoots) {
+            if (!sdk) { continue; }
+            const buildToolsDir = path.join(sdk, 'build-tools');
+            try {
+                const versions = fs.readdirSync(buildToolsDir).sort().reverse();
+                for (const ver of versions) {
+                    const aapt2Path = path.join(buildToolsDir, ver, 'aapt2');
+                    if (fs.existsSync(aapt2Path)) {
+                        return aapt2Path;
+                    }
+                }
+            } catch {}
+        }
+        return undefined;
+    }
+
+    getApkInfo(apkPath: string): {packageName: string; versionName: string; versionCode: string} | undefined {
+        const aapt2 = this.findAapt2();
+        if (!aapt2) { return undefined; }
+        try {
+            const { execSync } = require('child_process');
+            const output = execSync(`"${aapt2}" dump badging "${apkPath}"`, { encoding: 'utf8', timeout: 5000 });
+            const packageMatch = output.match(/package:\s+name='([^']+)'/);
+            const versionNameMatch = output.match(/versionName='([^']+)'/);
+            const versionCodeMatch = output.match(/versionCode='([^']+)'/);
+            if (packageMatch) {
+                return {
+                    packageName: packageMatch[1],
+                    versionName: versionNameMatch?.[1] ?? 'unknown',
+                    versionCode: versionCodeMatch?.[1] ?? 'unknown'
+                };
+            }
+        } catch {}
+        return undefined;
+    }
+
     async uninstallApp(deviceId: string, packageName: string): Promise<string> {
         return this.execute(`-s ${deviceId} uninstall ${packageName}`);
     }
@@ -194,9 +259,38 @@ export class AdbClient {
      * @param pid Optional PID to filter logs by process.
      * @param level Optional log level to filter by (V, D, I, W, E, F).
      */
+    private getLogcatChannel(): vscode.OutputChannel {
+        if (!this.logcatChannel) {
+            this.logcatChannel = vscode.window.createOutputChannel('ADB Logcat', 'logcat');
+        }
+        return this.logcatChannel;
+    }
+
+    public stopLogcat(): void {
+        if (this.logcatProcess) {
+            this.logcatProcess.kill();
+            this.logcatProcess = undefined;
+        }
+    }
+
+    public isLogcatRunning(): boolean {
+        return !!this.logcatProcess && !this.logcatProcess.killed;
+    }
+
+    public getLogcatState(): { deviceId?: string; pid?: string } {
+        return { deviceId: this.logcatDeviceId, pid: this.logcatPid };
+    }
+
     public async getLogcat(deviceId: string, pid?: string, level?: string): Promise<void> {
-        this.outputChannel.show();
-        this.outputChannel.appendLine(`Starting Logcat for device ${deviceId}...`);
+        this.stopLogcat();
+
+        const channel = this.getLogcatChannel();
+        channel.clear();
+        channel.show();
+        channel.appendLine(`Starting Logcat for device ${deviceId}... [Level: ${level || 'All'}]`);
+
+        this.logcatDeviceId = deviceId;
+        this.logcatPid = pid;
 
         const args = ['-s', deviceId, 'logcat', '-v', 'time'];
         if (pid) {
@@ -206,19 +300,23 @@ export class AdbClient {
             args.push(`*:${level}`);
         }
 
-        // We need to use spawn directly to handle streaming output
-        const child = require('child_process').spawn(this.adbPath, args);
+        const { spawn } = require('child_process');
+        const child = spawn(this.adbPath, args);
+        this.logcatProcess = child;
 
         child.stdout.on('data', (data: any) => {
-            this.outputChannel.append(data.toString());
+            channel.append(data.toString());
         });
 
         child.stderr.on('data', (data: any) => {
-            this.outputChannel.append(data.toString());
+            channel.append(data.toString());
         });
 
         child.on('close', (code: any) => {
-            this.outputChannel.appendLine(`Logcat process exited with code ${code}`);
+            channel.appendLine(`Logcat process exited with code ${code}`);
+            if (this.logcatProcess === child) {
+                this.logcatProcess = undefined;
+            }
         });
     }
 
@@ -276,7 +374,6 @@ export class AdbClient {
                     }
                 }
             }
-            return permissions.sort((a, b) => a.name.localeCompare(b.name));
             return permissions.sort((a, b) => a.name.localeCompare(b.name));
         } catch (e) {
             // console.error('Failed to get app permissions', e);

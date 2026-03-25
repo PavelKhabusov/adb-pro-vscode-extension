@@ -144,6 +144,32 @@
         }
       ]
     },
+    "languages": [
+      {
+        "id": "logcat",
+        "aliases": ["Logcat"],
+        "extensions": [".logcat"]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "logcat",
+        "scopeName": "source.logcat",
+        "path": "./syntaxes/logcat.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {"scope": "comment.line.logcat", "settings": {"foreground": "#808080"}},
+          {"scope": "keyword.other.logcat", "settings": {"foreground": "#4FC1FF"}},
+          {"scope": "entity.name.type.logcat", "settings": {"foreground": "#4EC9B0"}},
+          {"scope": "string.logcat", "settings": {"foreground": "#CCA700"}},
+          {"scope": "invalid.illegal.logcat", "settings": {"foreground": "#F44747"}},
+          {"scope": "comment.logcat", "settings": {"foreground": "#888888"}}
+        ]
+      }
+    },
     "configuration": {
       "title": "ADB",
       "properties": {
