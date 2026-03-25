@@ -31,6 +31,13 @@ export class AdbClient {
         this.adbPath = config.get<string>('path') || 'adb';
     }
 
+    private getLogcatChannel(): vscode.OutputChannel {
+        if (!this.logcatChannel) {
+            this.logcatChannel = vscode.window.createOutputChannel('ADB Logcat', 'logcat');
+        }
+        return this.logcatChannel;
+    }
+
     private async execute(command: string): Promise<string> {
         const fullCommand = `"${this.adbPath}" ${command}`;
         const config = vscode.workspace.getConfiguration('adb');
@@ -306,9 +313,11 @@ export class AdbClient {
 
         child.stdout.on('data', (data: any) => {
             channel.append(data.toString());
+            channel.append(data.toString());
         });
 
         child.stderr.on('data', (data: any) => {
+            channel.append(data.toString());
             channel.append(data.toString());
         });
 
