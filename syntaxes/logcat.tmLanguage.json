@@ -1,0 +1,67 @@
+{
+  "scopeName": "source.logcat",
+  "name": "Logcat",
+  "fileTypes": ["logcat"],
+  "patterns": [
+    {"include": "#separator"},
+    {"include": "#fatal"},
+    {"include": "#error"},
+    {"include": "#warning"},
+    {"include": "#info"},
+    {"include": "#debug"},
+    {"include": "#verbose"},
+    {"include": "#status"}
+  ],
+  "repository": {
+    "separator": {
+      "match": "^-+ beginning of .+$",
+      "name": "comment.line.separator.logcat"
+    },
+    "fatal": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?F[/ ].*$",
+      "name": "invalid.illegal.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "error": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?E[/ ].*$",
+      "name": "invalid.illegal.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "warning": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?W[/ ].*$",
+      "name": "string.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "info": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?I[/ ].*$",
+      "name": "entity.name.type.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "debug": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?D[/ ].*$",
+      "name": "keyword.other.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "verbose": {
+      "match": "^(\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\s+)?(?:\\d+\\s+\\d+\\s+)?V[/ ].*$",
+      "name": "comment.line.logcat",
+      "captures": {
+        "1": {"name": "comment.logcat"}
+      }
+    },
+    "status": {
+      "match": "^(?:Starting Logcat|Logcat process exited).*$",
+      "name": "comment.line.status.logcat"
+    }
+  }
+}
