@@ -24,18 +24,12 @@ export class AdbClient {
     private logcatChannel?: vscode.OutputChannel;
     private logcatProcess?: ChildProcess;
     private logcatDeviceId?: string;
-    private logcatPid?: string;
+    private logcatPackageName?: string;
+    private logcatPidRefreshTimer?: NodeJS.Timeout;
 
     constructor(private outputChannel: vscode.OutputChannel) {
         const config = vscode.workspace.getConfiguration('adb');
         this.adbPath = config.get<string>('path') || 'adb';
-    }
-
-    private getLogcatChannel(): vscode.OutputChannel {
-        if (!this.logcatChannel) {
-            this.logcatChannel = vscode.window.createOutputChannel('ADB Logcat', 'logcat');
-        }
-        return this.logcatChannel;
     }
 
     private async execute(command: string): Promise<string> {
@@ -274,50 +268,83 @@ export class AdbClient {
     }
 
     public stopLogcat(): void {
+        if (this.logcatPidRefreshTimer) {
+            clearInterval(this.logcatPidRefreshTimer);
+            this.logcatPidRefreshTimer = undefined;
+        }
         if (this.logcatProcess) {
             this.logcatProcess.kill();
             this.logcatProcess = undefined;
         }
     }
 
-    public isLogcatRunning(): boolean {
-        return !!this.logcatProcess && !this.logcatProcess.killed;
-    }
-
-    public getLogcatState(): { deviceId?: string; pid?: string } {
-        return { deviceId: this.logcatDeviceId, pid: this.logcatPid };
-    }
-
-    public async getLogcat(deviceId: string, pid?: string, level?: string): Promise<void> {
+    public async getLogcat(deviceId: string, packageName?: string, level?: string): Promise<void> {
         this.stopLogcat();
 
         const channel = this.getLogcatChannel();
         channel.clear();
         channel.show();
-        channel.appendLine(`Starting Logcat for device ${deviceId}... [Level: ${level || 'All'}]`);
+
+        const label = [
+            level ? `Level: ${level}` : 'Level: All',
+            packageName ? `App: ${packageName}` : null
+        ].filter(Boolean).join(', ');
+        channel.appendLine(`Starting Logcat for device ${deviceId}... [${label}]`);
 
         this.logcatDeviceId = deviceId;
-        this.logcatPid = pid;
+        this.logcatPackageName = packageName;
 
+        // Run logcat WITHOUT --pid so we can dynamically track PID changes
         const args = ['-s', deviceId, 'logcat', '-v', 'time'];
-        if (pid) {
-            args.push(`--pid=${pid}`);
-        }
         if (level) {
             args.push(`*:${level}`);
+        }
+
+        // Resolve PID for package filtering
+        let currentPid: string | undefined;
+        if (packageName) {
+            currentPid = await this.getPidForPackage(deviceId, packageName).catch(() => undefined);
+            if (currentPid) {
+                channel.appendLine(`Filtering by PID: ${currentPid}`);
+            } else {
+                channel.appendLine(`App not running yet, waiting...`);
+            }
+
+            // Periodically refresh PID (app may restart)
+            this.logcatPidRefreshTimer = setInterval(async () => {
+                const newPid = await this.getPidForPackage(deviceId, packageName).catch(() => undefined);
+                if (newPid && newPid !== currentPid) {
+                    currentPid = newPid;
+                    channel.appendLine(`--- App restarted, new PID: ${currentPid} ---`);
+                } else if (!newPid && currentPid) {
+                    currentPid = undefined;
+                    channel.appendLine(`--- App stopped ---`);
+                }
+            }, 2000);
         }
 
         const { spawn } = require('child_process');
         const child = spawn(this.adbPath, args);
         this.logcatProcess = child;
 
+        let lineBuffer = '';
         child.stdout.on('data', (data: any) => {
-            channel.append(data.toString());
-            channel.append(data.toString());
+            if (!packageName) {
+                channel.append(data.toString());
+                return;
+            }
+            // Filter by PID, handling partial lines
+            lineBuffer += data.toString();
+            const lines = lineBuffer.split('\n');
+            lineBuffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!currentPid || line.match(new RegExp(`\\(\\s*${currentPid}\\)`))) {
+                    channel.appendLine(line);
+                }
+            }
         });
 
         child.stderr.on('data', (data: any) => {
-            channel.append(data.toString());
             channel.append(data.toString());
         });
 
@@ -325,6 +352,10 @@ export class AdbClient {
             channel.appendLine(`Logcat process exited with code ${code}`);
             if (this.logcatProcess === child) {
                 this.logcatProcess = undefined;
+            }
+            if (this.logcatPidRefreshTimer) {
+                clearInterval(this.logcatPidRefreshTimer);
+                this.logcatPidRefreshTimer = undefined;
             }
         });
     }

@@ -514,15 +514,7 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!levelPick) { return; }
                 const level = levelPick.label === 'All' ? undefined : levelPick.label;
 
-                let pid: string | undefined;
-                if (packageName) {
-                    pid = await adbClient.getPidForPackage(deviceId, packageName);
-                    if (!pid) {
-                        vscode.window.showWarningMessage(`Could not find PID for package: ${packageName}. Showing all logs.`);
-                    }
-                }
-
-                await adbClient.getLogcat(deviceId, pid, level);
+                await adbClient.getLogcat(deviceId, packageName, level);
             } catch (e: any) {
                 vscode.window.showErrorMessage(e.message);
             }
