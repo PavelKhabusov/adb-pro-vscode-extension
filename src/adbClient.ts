@@ -1,5 +1,6 @@
 import { exec, ChildProcess } from 'child_process';
 import { promisify } from 'util';
+import * as os from 'os';
 import * as vscode from 'vscode';
 
 const execAsync = promisify(exec);
@@ -30,6 +31,19 @@ export class AdbClient {
     constructor(private outputChannel: vscode.OutputChannel) {
         const config = vscode.workspace.getConfiguration('adb');
         this.adbPath = config.get<string>('path') || 'adb';
+    }
+
+    /**
+     * Kills gvfsd-mtp/gvfsd-gphoto2 on Linux to prevent PTP/MTP conflicts
+     * that cause Nautilus (GNOME Files) to hang or crash.
+     */
+    public async killConflictingMtpServices(): Promise<void> {
+        if (os.platform() !== 'linux') { return; }
+        try {
+            await execAsync('killall gvfsd-mtp gvfsd-gphoto2 2>/dev/null');
+        } catch {
+            // Processes not running — nothing to kill
+        }
     }
 
     private async execute(command: string): Promise<string> {
@@ -197,6 +211,7 @@ export class AdbClient {
     }
 
     async restartServer(): Promise<string> {
+        await this.killConflictingMtpServices();
         await this.execute('kill-server');
         return this.execute('start-server');
     }

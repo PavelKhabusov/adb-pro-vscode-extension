@@ -13,6 +13,7 @@ import { TargetAppManager } from './appManager';
 export function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel('ADB Pro');
     const adbClient = new AdbClient(outputChannel);
+    adbClient.killConflictingMtpServices();
     const targetAppManager = new TargetAppManager(context);
     context.subscriptions.push(targetAppManager);
 
@@ -90,13 +91,21 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (deviceId) {
+            let defaultUri: vscode.Uri | undefined;
             const lastApkFolder = context.globalState.get<string>('lastApkFolder');
+            if (lastApkFolder) {
+                try {
+                    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(), 2000));
+                    await Promise.race([vscode.workspace.fs.stat(vscode.Uri.file(lastApkFolder)), timeout]);
+                    defaultUri = vscode.Uri.file(lastApkFolder);
+                } catch {}
+            }
             const uris = await vscode.window.showOpenDialog({
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
                 filters: { 'APK Files': ['apk'] },
-                defaultUri: lastApkFolder ? vscode.Uri.file(lastApkFolder) : undefined
+                defaultUri
             });
 
             if (uris && uris.length > 0) {
